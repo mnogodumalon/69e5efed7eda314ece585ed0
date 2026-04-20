@@ -25,6 +25,27 @@ const HOUR_END = 20;
 const HOUR_HEIGHT = 48; // px per hour
 const HOURS = Array.from({ length: HOUR_END - HOUR_START + 1 }, (_, i) => i + HOUR_START);
 
+// Computes column layout for overlapping timeslots within a day
+function computeSlotLayout(slots: Array<{ id: string; startH: number; endH: number }>): Map<string, { col: number; totalCols: number }> {
+  const result = new Map<string, { col: number; totalCols: number }>();
+  if (slots.length === 0) return result;
+  const sorted = [...slots].sort((a, b) => a.startH - b.startH || b.endH - a.endH);
+  const columns: Array<typeof sorted> = [];
+  for (const slot of sorted) {
+    let placed = false;
+    for (let c = 0; c < columns.length; c++) {
+      if (!columns[c].some(s => slot.startH < s.endH && s.startH < slot.endH)) {
+        columns[c].push(slot); placed = true; break;
+      }
+    }
+    if (!placed) columns.push([slot]);
+  }
+  const totalCols = columns.length;
+  for (let c = 0; c < columns.length; c++)
+    for (const s of columns[c]) result.set(s.id, { col: c, totalCols });
+  return result;
+}
+
 export default function DashboardOverview() {
   const {
     anbieterprofil, standorte, timeslots, terminbuchung,
@@ -46,6 +67,7 @@ export default function DashboardOverview() {
   const [editBuchung, setEditBuchung] = useState<EnrichedTerminbuchung | null>(null);
   const [deleteBuchung, setDeleteBuchung] = useState<EnrichedTerminbuchung | null>(null);
   const [selectedAnbieterId, setSelectedAnbieterId] = useState<string | null>(null);
+  const [foregroundId, setForegroundId] = useState<string | null>(null);
 
   // Unique providers that actually have timeslots
   const anbieterForFilter = useMemo(() => {
@@ -315,46 +337,82 @@ export default function DashboardOverview() {
                         {HOURS.map(h => (
                           <div key={h} className="absolute left-0 right-0 border-t border-border/30" style={{ top: (h - HOUR_START) * HOUR_HEIGHT }} />
                         ))}
-                        {/* Timeslots */}
-                        {daySlots.map(ts => {
-                          const isSelected = selectedTimeslot?.record_id === ts.record_id;
-                          const buchungen = buchungenByTimeslot.get(ts.record_id) ?? [];
-                          const statusKey = ts.fields.status?.key;
-                          const borderColor =
-                            statusKey === 'aktiv' ? 'border-l-green-500' :
-                            statusKey === 'ausgebucht' ? 'border-l-orange-400' :
-                            'border-l-gray-400';
-                          let topPx = 0;
-                          let heightPx = HOUR_HEIGHT;
-                          try {
-                            const start = parseISO(ts.fields.startzeit!);
-                            const startH = start.getHours() + start.getMinutes() / 60;
-                            topPx = Math.max(0, (startH - HOUR_START) * HOUR_HEIGHT);
-                            if (ts.fields.endzeit) {
-                              const end = parseISO(ts.fields.endzeit);
-                              const endH = end.getHours() + end.getMinutes() / 60;
-                              heightPx = Math.max(24, (endH - startH) * HOUR_HEIGHT);
-                            }
-                          } catch { /* keep defaults */ }
-                          return (
-                            <button
-                              key={ts.record_id}
-                              onClick={() => setSelectedTimeslot(isSelected ? null : ts)}
-                              className={`absolute left-0.5 right-0.5 text-left rounded border-l-2 px-1 py-0.5 overflow-hidden transition-all ${borderColor} ${isSelected ? 'bg-primary/10 ring-1 ring-primary' : 'bg-muted/60 hover:bg-muted'}`}
-                              style={{ top: topPx + 1, height: Math.max(heightPx - 2, 20) }}
-                            >
-                              <div className="text-[10px] font-semibold truncate text-foreground leading-tight">
-                                {ts.fields.titel || 'Termin'}
-                              </div>
-                              {heightPx >= 32 && (
-                                <div className="text-[9px] text-muted-foreground truncate leading-tight">
-                                  {formatTime(ts.fields.startzeit)}
-                                  {ts.fields.max_kapazitaet ? ` · ${buchungen.length}/${ts.fields.max_kapazitaet}` : ''}
+                        {/* Timeslots with overlap-aware layout */}
+                        {(() => {
+                          const slotTimes = daySlots.map(ts => {
+                            let startH = HOUR_START, endH = HOUR_START + 1;
+                            try {
+                              const s = parseISO(ts.fields.startzeit!);
+                              startH = s.getHours() + s.getMinutes() / 60;
+                              if (ts.fields.endzeit) {
+                                const e = parseISO(ts.fields.endzeit);
+                                endH = e.getHours() + e.getMinutes() / 60;
+                              } else { endH = startH + 1; }
+                            } catch {}
+                            return { ts, startH, endH };
+                          });
+                          const layout = computeSlotLayout(slotTimes.map(s => ({ id: s.ts.record_id, startH: s.startH, endH: s.endH })));
+                          return slotTimes.map(({ ts, startH, endH }) => {
+                            const isSelected = selectedTimeslot?.record_id === ts.record_id;
+                            const buchungen = buchungenByTimeslot.get(ts.record_id) ?? [];
+                            const statusKey = ts.fields.status?.key;
+                            const borderColor =
+                              statusKey === 'aktiv' ? 'border-l-green-500' :
+                              statusKey === 'ausgebucht' ? 'border-l-orange-400' :
+                              'border-l-gray-400';
+                            const topPx = Math.max(0, (startH - HOUR_START) * HOUR_HEIGHT);
+                            const heightPx = Math.max(24, (endH - startH) * HOUR_HEIGHT);
+                            const { col, totalCols } = layout.get(ts.record_id) ?? { col: 0, totalCols: 1 };
+                            const hasConflict = totalCols > 1;
+                            const colW = 100 / totalCols;
+                            // A slot is "front" if explicitly foregrounded OR default (col 0)
+                            // but only when no other overlapping slot is the foreground
+                            const conflictingFgExists = hasConflict && slotTimes.some(o =>
+                              o.ts.record_id !== ts.record_id &&
+                              o.ts.record_id === foregroundId &&
+                              startH < o.endH && o.startH < endH
+                            );
+                            const isFront = !hasConflict ||
+                              foregroundId === ts.record_id ||
+                              (!conflictingFgExists && col === 0);
+                            return (
+                              <button
+                                key={ts.record_id}
+                                title={hasConflict && !isFront ? 'Klicken um in den Vordergrund zu bringen' : undefined}
+                                onClick={() => {
+                                  if (hasConflict && !isFront) {
+                                    setForegroundId(ts.record_id);
+                                    setSelectedTimeslot(ts);
+                                  } else {
+                                    setSelectedTimeslot(isSelected ? null : ts);
+                                  }
+                                }}
+                                className={`absolute text-left rounded border-l-2 px-1 py-0.5 overflow-hidden transition-all ${borderColor} ${
+                                  isSelected ? 'bg-primary/10 ring-1 ring-primary' :
+                                  isFront ? 'bg-muted/60 hover:bg-muted' : 'bg-muted/40 hover:bg-muted/60'
+                                }`}
+                                style={{
+                                  top: topPx + 1,
+                                  height: Math.max(heightPx - 2, 20),
+                                  left: `calc(${col * colW}% + 1px)`,
+                                  right: `calc(${100 - (col + 1) * colW}% + 1px)`,
+                                  zIndex: isFront ? 2 : 1,
+                                  opacity: hasConflict && !isFront ? 0.5 : 1,
+                                }}
+                              >
+                                <div className="text-[10px] font-semibold truncate text-foreground leading-tight">
+                                  {ts.fields.titel || 'Termin'}
                                 </div>
-                              )}
-                            </button>
-                          );
-                        })}
+                                {heightPx >= 32 && (
+                                  <div className="text-[9px] text-muted-foreground truncate leading-tight">
+                                    {formatTime(ts.fields.startzeit)}
+                                    {ts.fields.max_kapazitaet ? ` · ${buchungen.length}/${ts.fields.max_kapazitaet}` : ''}
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                     );
                   })}
