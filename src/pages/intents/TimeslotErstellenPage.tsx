@@ -330,10 +330,6 @@ export default function TimeslotErstellenPage() {
                 open={timeslotDialogOpen}
                 onClose={() => {
                   setTimeslotDialogOpen(false);
-                  // Falls Dialog geschlossen wird ohne Submit — zurück zu Schritt 2
-                  if (!createdTimeslot) {
-                    goToStep(2);
-                  }
                 }}
                 onSubmit={async (fields) => {
                   const result = await LivingAppsService.createTimeslot(fields);
