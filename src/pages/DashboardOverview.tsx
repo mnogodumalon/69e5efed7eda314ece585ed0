@@ -4,7 +4,7 @@ import type { EnrichedTimeslots, EnrichedTerminbuchung } from '@/types/enriched'
 import { APP_IDS, LOOKUP_OPTIONS } from '@/types/app';
 import { LivingAppsService, extractRecordId, createRecordUrl } from '@/services/livingAppsService';
 import { formatDate } from '@/lib/formatters';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { IconAlertCircle, IconTool, IconRefresh, IconCheck, IconPlus, IconPencil, IconTrash, IconCalendar, IconClock, IconMapPin, IconUsers, IconVideo, IconX, IconChevronLeft, IconChevronRight, IconCircleCheck, IconCircleX, IconClockOff } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
@@ -68,6 +68,8 @@ export default function DashboardOverview() {
   const [deleteBuchung, setDeleteBuchung] = useState<EnrichedTerminbuchung | null>(null);
   const [selectedAnbieterId, setSelectedAnbieterId] = useState<string | null>(null);
   const [foregroundId, setForegroundId] = useState<string | null>(null);
+  const calendarScrollRef = useRef<HTMLDivElement>(null);
+  const initialSelectionDone = useRef(false);
 
   // Unique providers that actually have timeslots
   const anbieterForFilter = useMemo(() => {
@@ -126,6 +128,46 @@ export default function DashboardOverview() {
   const selectedBuchungen = selectedTimeslot
     ? (buchungenByTimeslot.get(selectedTimeslot.record_id) ?? [])
     : [];
+
+  // Auto-select the first upcoming timeslot on initial load
+  useEffect(() => {
+    if (initialSelectionDone.current) return;
+    if (enrichedTimeslots.length === 0) return;
+    const now = new Date();
+    const first = [...enrichedTimeslots]
+      .filter(ts => {
+        if (!ts.fields.startzeit) return false;
+        try { return parseISO(ts.fields.startzeit) >= now; } catch { return false; }
+      })
+      .sort((a, b) => (a.fields.startzeit ?? '').localeCompare(b.fields.startzeit ?? ''))[0];
+    if (first) {
+      initialSelectionDone.current = true;
+      setSelectedTimeslot(first);
+      try {
+        const d = parseISO(first.fields.startzeit!);
+        setCurrentWeekStart(startOfWeek(d, { weekStartsOn: 1 }));
+      } catch {}
+    }
+  }, [enrichedTimeslots]);
+
+  // Scroll calendar to first timeslot of the week (or 1h before current time)
+  useEffect(() => {
+    const el = calendarScrollRef.current;
+    if (!el) return;
+    const earliest = timeslotsThisWeek
+      .map(ts => {
+        try {
+          const s = parseISO(ts.fields.startzeit!);
+          return s.getHours() + s.getMinutes() / 60;
+        } catch { return null; }
+      })
+      .filter((h): h is number => h !== null)
+      .sort((a, b) => a - b)[0];
+    const targetH = earliest ?? (new Date().getHours() + new Date().getMinutes() / 60);
+    const clampedH = Math.max(HOUR_START, Math.min(HOUR_END, targetH));
+    const scrollTop = Math.max(0, (clampedH - HOUR_START - 1) * HOUR_HEIGHT);
+    el.scrollTo({ top: scrollTop, behavior: 'smooth' });
+  }, [timeslotsThisWeek, currentWeekStart]);
 
   if (loading) return <DashboardSkeleton />;
   if (error) return <DashboardError error={error} onRetry={fetchAll} />;
@@ -314,7 +356,7 @@ export default function DashboardOverview() {
                 })}
               </div>
               {/* Time body */}
-              <div className="flex overflow-y-auto" style={{ height: 400 }}>
+              <div ref={calendarScrollRef} className="flex overflow-y-auto" style={{ height: 400 }}>
                 {/* Hour labels */}
                 <div className="w-10 shrink-0 relative" style={{ height: HOURS.length * HOUR_HEIGHT }}>
                   {HOURS.map(h => (
