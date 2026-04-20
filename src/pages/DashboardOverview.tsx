@@ -40,13 +40,34 @@ export default function DashboardOverview() {
   const [buchungDialogOpen, setBuchungDialogOpen] = useState(false);
   const [editBuchung, setEditBuchung] = useState<EnrichedTerminbuchung | null>(null);
   const [deleteBuchung, setDeleteBuchung] = useState<EnrichedTerminbuchung | null>(null);
+  const [selectedAnbieterId, setSelectedAnbieterId] = useState<string | null>(null);
+
+  // Unique providers that actually have timeslots
+  const anbieterForFilter = useMemo(() => {
+    const seen = new Map<string, string>();
+    enrichedTimeslots.forEach(ts => {
+      const id = extractRecordId(ts.fields.anbieter);
+      if (id && !seen.has(id)) {
+        const anbieter = anbieterprofil.find(a => a.record_id === id);
+        const vorname = anbieter?.fields.vorname ?? ts.anbieterName ?? id;
+        seen.set(id, vorname);
+      }
+    });
+    return Array.from(seen.entries()).map(([id, vorname]) => ({ id, vorname }));
+  }, [enrichedTimeslots, anbieterprofil]);
+
+  // Filtered timeslots for calendar + upcoming list
+  const filteredTimeslots = useMemo(() => {
+    if (!selectedAnbieterId) return enrichedTimeslots;
+    return enrichedTimeslots.filter(ts => extractRecordId(ts.fields.anbieter) === selectedAnbieterId);
+  }, [enrichedTimeslots, selectedAnbieterId]);
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
   }, [currentWeekStart]);
 
   const timeslotsThisWeek = useMemo(() => {
-    return enrichedTimeslots.filter(ts => {
+    return filteredTimeslots.filter(ts => {
       if (!ts.fields.startzeit) return false;
       try {
         const d = parseISO(ts.fields.startzeit);
@@ -189,6 +210,35 @@ export default function DashboardOverview() {
         />
       </div>
 
+      {/* Anbieter-Filterleiste */}
+      {anbieterForFilter.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setSelectedAnbieterId(null)}
+            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors border ${
+              selectedAnbieterId === null
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-card text-muted-foreground border-border hover:bg-muted'
+            }`}
+          >
+            Alle
+          </button>
+          {anbieterForFilter.map(a => (
+            <button
+              key={a.id}
+              onClick={() => setSelectedAnbieterId(selectedAnbieterId === a.id ? null : a.id)}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors border ${
+                selectedAnbieterId === a.id
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-card text-muted-foreground border-border hover:bg-muted'
+              }`}
+            >
+              {a.vorname}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Main workspace: Weekly calendar + detail panel */}
       <div className="flex flex-col lg:flex-row gap-4">
         {/* Weekly Calendar */}
@@ -277,6 +327,7 @@ export default function DashboardOverview() {
         <div className="w-full lg:w-80 shrink-0">
           {selectedTimeslot ? (
             <TimeslotDetail
+              key={selectedTimeslot.record_id}
               ts={selectedTimeslot}
               buchungen={selectedBuchungen}
               onEdit={() => { setEditTimeslot(selectedTimeslot); setTimeslotDialogOpen(true); }}
@@ -299,7 +350,7 @@ export default function DashboardOverview() {
 
       {/* Upcoming timeslots list */}
       <UpcomingTimeslots
-        enrichedTimeslots={enrichedTimeslots}
+        enrichedTimeslots={filteredTimeslots}
         buchungenByTimeslot={buchungenByTimeslot}
         onSelect={setSelectedTimeslot}
         selectedId={selectedTimeslot?.record_id}
@@ -375,6 +426,11 @@ function TimeslotDetail({
   statusBadge: (ts: EnrichedTimeslots) => React.ReactNode;
   formatTime: (dt: string | undefined) => string;
 }) {
+  const PAGE_SIZE = 3;
+  const [buchungPage, setBuchungPage] = useState(0);
+  const totalPages = Math.ceil(buchungen.length / PAGE_SIZE);
+  const pagedBuchungen = buchungen.slice(buchungPage * PAGE_SIZE, (buchungPage + 1) * PAGE_SIZE);
+
   return (
     <div className="bg-card border rounded-2xl overflow-hidden flex flex-col">
       {/* Header */}
@@ -439,11 +495,11 @@ function TimeslotDetail({
             Hinzufügen
           </button>
         </div>
-        <div className="overflow-y-auto max-h-64 px-4 pb-4 space-y-2">
+        <div className="px-4 pb-3 space-y-2">
           {buchungen.length === 0 ? (
             <div className="text-center py-4 text-sm text-muted-foreground">Noch keine Buchungen</div>
           ) : (
-            buchungen.map(b => (
+            pagedBuchungen.map(b => (
               <div key={b.record_id} className="flex items-start justify-between gap-2 p-2 rounded-lg bg-muted/40 border">
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium truncate">
@@ -468,6 +524,27 @@ function TimeslotDetail({
             ))
           )}
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 pb-3 border-t pt-2 mt-auto">
+            <button
+              onClick={() => setBuchungPage(p => Math.max(0, p - 1))}
+              disabled={buchungPage === 0}
+              className="p-1 rounded-lg hover:bg-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <IconChevronLeft size={14} />
+            </button>
+            <span className="text-xs text-muted-foreground">
+              {buchungPage + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setBuchungPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={buchungPage === totalPages - 1}
+              className="p-1 rounded-lg hover:bg-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <IconChevronRight size={14} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
