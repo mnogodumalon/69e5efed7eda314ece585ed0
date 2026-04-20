@@ -137,6 +137,30 @@ export default function DashboardOverview() {
 
   return (
     <div className="space-y-6">
+      {/* Workflow Navigation */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <a href="#/intents/timeslot-erstellen" className="block bg-card border border-border rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow border-l-4 border-l-primary group overflow-hidden">
+          <div className="flex items-center gap-3 min-w-0">
+            <IconCalendar size={20} className="text-primary shrink-0" stroke={1.8} />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm truncate">Neuen Timeslot erstellen</p>
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">Anbieter wählen, Standort festlegen und Timeslot anlegen</p>
+            </div>
+            <IconChevronRight size={16} className="text-muted-foreground shrink-0 group-hover:text-primary transition-colors" stroke={2} />
+          </div>
+        </a>
+        <a href="#/intents/termin-buchen" className="block bg-card border border-border rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow border-l-4 border-l-primary group overflow-hidden">
+          <div className="flex items-center gap-3 min-w-0">
+            <IconUsers size={20} className="text-primary shrink-0" stroke={1.8} />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm truncate">Termin buchen</p>
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">Anbieter auswählen, Termin finden und Buchung abschließen</p>
+            </div>
+            <IconChevronRight size={16} className="text-muted-foreground shrink-0 group-hover:text-primary transition-colors" stroke={2} />
+          </div>
+        </a>
+      </div>
+
       {/* KPI Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
