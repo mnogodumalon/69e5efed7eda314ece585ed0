@@ -20,6 +20,11 @@ import { de } from 'date-fns/locale';
 const APPGROUP_ID = '69e5efed7eda314ece585ed0';
 const REPAIR_ENDPOINT = '/claude/build/repair';
 
+const HOUR_START = 8;
+const HOUR_END = 20;
+const HOUR_HEIGHT = 48; // px per hour
+const HOURS = Array.from({ length: HOUR_END - HOUR_START + 1 }, (_, i) => i + HOUR_START);
+
 export default function DashboardOverview() {
   const {
     anbieterprofil, standorte, timeslots, terminbuchung,
@@ -266,19 +271,16 @@ export default function DashboardOverview() {
             </div>
           </div>
 
-          {/* Day columns */}
+          {/* Time grid */}
           <div className="overflow-x-auto">
-            <div className="grid grid-cols-7 min-w-[560px]">
-              {weekDays.map(day => {
-                const daySlots = timeslotsThisWeek.filter(ts => {
-                  if (!ts.fields.startzeit) return false;
-                  try { return isSameDay(parseISO(ts.fields.startzeit), day); } catch { return false; }
-                });
-                const today = isToday(day);
-                return (
-                  <div key={day.toISOString()} className="border-r last:border-r-0">
-                    {/* Day header */}
-                    <div className={`px-2 py-2 text-center border-b ${today ? 'bg-primary/5' : ''}`}>
+            <div className="min-w-[600px]">
+              {/* Day headers */}
+              <div className="flex border-b">
+                <div className="w-10 shrink-0" />
+                {weekDays.map(day => {
+                  const today = isToday(day);
+                  return (
+                    <div key={day.toISOString()} className={`flex-1 min-w-0 text-center py-2 border-l ${today ? 'bg-primary/5' : ''}`}>
                       <div className={`text-xs font-medium ${today ? 'text-primary' : 'text-muted-foreground'}`}>
                         {format(day, 'EEE', { locale: de })}
                       </div>
@@ -286,39 +288,78 @@ export default function DashboardOverview() {
                         {format(day, 'd')}
                       </div>
                     </div>
-                    {/* Slots */}
-                    <div className="p-1 min-h-[120px] space-y-1">
-                      {daySlots.length === 0 && (
-                        <div className="text-center text-muted-foreground/40 text-[10px] pt-4">–</div>
-                      )}
-                      {daySlots.map(ts => {
-                        const isSelected = selectedTimeslot?.record_id === ts.record_id;
-                        const buchungen = buchungenByTimeslot.get(ts.record_id) ?? [];
-                        const statusKey = ts.fields.status?.key;
-                        const borderColor =
-                          statusKey === 'aktiv' ? 'border-l-green-500' :
-                          statusKey === 'ausgebucht' ? 'border-l-orange-400' :
-                          'border-l-gray-400';
-                        return (
-                          <button
-                            key={ts.record_id}
-                            onClick={() => setSelectedTimeslot(isSelected ? null : ts)}
-                            className={`w-full text-left rounded-lg border-l-2 px-1.5 py-1 transition-all ${borderColor} ${isSelected ? 'bg-primary/10 ring-1 ring-primary' : 'bg-muted/40 hover:bg-muted'}`}
-                          >
-                            <div className="text-[10px] font-semibold truncate text-foreground">
-                              {ts.fields.titel || 'Termin'}
-                            </div>
-                            <div className="text-[9px] text-muted-foreground truncate">
-                              {formatTime(ts.fields.startzeit)}
-                              {ts.fields.max_kapazitaet ? ` · ${buchungen.length}/${ts.fields.max_kapazitaet}` : ''}
-                            </div>
-                          </button>
-                        );
-                      })}
+                  );
+                })}
+              </div>
+              {/* Time body */}
+              <div className="flex overflow-y-auto" style={{ height: 400 }}>
+                {/* Hour labels */}
+                <div className="w-10 shrink-0 relative" style={{ height: HOURS.length * HOUR_HEIGHT }}>
+                  {HOURS.map(h => (
+                    <div key={h} className="absolute left-0 right-0 flex justify-end pr-1.5" style={{ top: (h - HOUR_START) * HOUR_HEIGHT - 7 }}>
+                      <span className="text-[9px] text-muted-foreground/60 font-medium">{h}:00</span>
                     </div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+                {/* Day columns */}
+                <div className="flex flex-1 min-w-0" style={{ height: HOURS.length * HOUR_HEIGHT }}>
+                  {weekDays.map(day => {
+                    const daySlots = timeslotsThisWeek.filter(ts => {
+                      if (!ts.fields.startzeit) return false;
+                      try { return isSameDay(parseISO(ts.fields.startzeit), day); } catch { return false; }
+                    });
+                    const today = isToday(day);
+                    return (
+                      <div key={day.toISOString()} className={`flex-1 min-w-0 border-l relative ${today ? 'bg-primary/5' : ''}`}>
+                        {/* Hour grid lines */}
+                        {HOURS.map(h => (
+                          <div key={h} className="absolute left-0 right-0 border-t border-border/30" style={{ top: (h - HOUR_START) * HOUR_HEIGHT }} />
+                        ))}
+                        {/* Timeslots */}
+                        {daySlots.map(ts => {
+                          const isSelected = selectedTimeslot?.record_id === ts.record_id;
+                          const buchungen = buchungenByTimeslot.get(ts.record_id) ?? [];
+                          const statusKey = ts.fields.status?.key;
+                          const borderColor =
+                            statusKey === 'aktiv' ? 'border-l-green-500' :
+                            statusKey === 'ausgebucht' ? 'border-l-orange-400' :
+                            'border-l-gray-400';
+                          let topPx = 0;
+                          let heightPx = HOUR_HEIGHT;
+                          try {
+                            const start = parseISO(ts.fields.startzeit!);
+                            const startH = start.getHours() + start.getMinutes() / 60;
+                            topPx = Math.max(0, (startH - HOUR_START) * HOUR_HEIGHT);
+                            if (ts.fields.endzeit) {
+                              const end = parseISO(ts.fields.endzeit);
+                              const endH = end.getHours() + end.getMinutes() / 60;
+                              heightPx = Math.max(24, (endH - startH) * HOUR_HEIGHT);
+                            }
+                          } catch { /* keep defaults */ }
+                          return (
+                            <button
+                              key={ts.record_id}
+                              onClick={() => setSelectedTimeslot(isSelected ? null : ts)}
+                              className={`absolute left-0.5 right-0.5 text-left rounded border-l-2 px-1 py-0.5 overflow-hidden transition-all ${borderColor} ${isSelected ? 'bg-primary/10 ring-1 ring-primary' : 'bg-muted/60 hover:bg-muted'}`}
+                              style={{ top: topPx + 1, height: Math.max(heightPx - 2, 20) }}
+                            >
+                              <div className="text-[10px] font-semibold truncate text-foreground leading-tight">
+                                {ts.fields.titel || 'Termin'}
+                              </div>
+                              {heightPx >= 32 && (
+                                <div className="text-[9px] text-muted-foreground truncate leading-tight">
+                                  {formatTime(ts.fields.startzeit)}
+                                  {ts.fields.max_kapazitaet ? ` · ${buchungen.length}/${ts.fields.max_kapazitaet}` : ''}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </div>
