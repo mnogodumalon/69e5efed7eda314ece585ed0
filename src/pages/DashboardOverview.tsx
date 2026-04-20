@@ -70,6 +70,7 @@ export default function DashboardOverview() {
   const [foregroundId, setForegroundId] = useState<string | null>(null);
   const calendarScrollRef = useRef<HTMLDivElement>(null);
   const initialSelectionDone = useRef(false);
+  const [scrollbarWidth, setScrollbarWidth] = useState(0);
 
   // Unique providers that actually have timeslots
   const anbieterForFilter = useMemo(() => {
@@ -167,6 +168,7 @@ export default function DashboardOverview() {
     const clampedH = Math.max(HOUR_START, Math.min(HOUR_END, targetH));
     const scrollTop = Math.max(0, (clampedH - HOUR_START - 1) * HOUR_HEIGHT);
     el.scrollTo({ top: scrollTop, behavior: 'smooth' });
+    setScrollbarWidth(el.offsetWidth - el.clientWidth);
   }, [timeslotsThisWeek, currentWeekStart]);
 
   if (loading) return <DashboardSkeleton />;
@@ -354,6 +356,7 @@ export default function DashboardOverview() {
                     </div>
                   );
                 })}
+                {scrollbarWidth > 0 && <div className="shrink-0" style={{ width: scrollbarWidth }} />}
               </div>
               {/* Time body */}
               <div ref={calendarScrollRef} className="flex overflow-y-auto" style={{ height: 400 }}>
